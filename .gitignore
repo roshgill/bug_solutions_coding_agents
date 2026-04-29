@@ -1,0 +1,36 @@
+# Virtual Environment
+venv/
+env/
+.venv/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Data/Cache
+*.db
+*.sqlite3
+chroma_db/
+issues_corpus.json
+*.log
+
+# Distribution
+build/
+dist/
+*.egg-info/
