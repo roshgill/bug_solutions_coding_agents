@@ -1,13 +1,10 @@
 import os
 import json
-from contextlib import asynccontextmanager
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from openai import OpenAI
 import chromadb
 from pydantic import Field
-from fastapi import FastAPI
-import uvicorn
 
 load_dotenv()
 
@@ -17,9 +14,11 @@ if not OPENAI_API_KEY:
 
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-CHROMA_DB_PATH = "/Users/roshgill/Desktop/bug_solutions_mcp/chroma_db"
+# Use relative paths that work both locally and in Docker/Fly
+BASE_PATH = os.path.dirname(os.path.abspath(__file__))
+CHROMA_DB_PATH = os.path.join(BASE_PATH, "chroma_db")
 COLLECTION_NAME = "github_issues"
-CORPUS_PATH = "/Users/roshgill/Desktop/bug_solutions_mcp/issues_corpus.json"
+CORPUS_PATH = os.path.join(BASE_PATH, "issues_corpus.json")
 
 # Initialize Chroma
 chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
@@ -113,17 +112,6 @@ def search_bugs(
         return json.dumps({"error": f"Error searching issues: {str(e)}"})
 
 
-# FastAPI app with MCP
-app = FastAPI(title="Bug Solutions MCP")
-
-@app.get("/health")
-def health_check():
-    return {"status": "ok", "service": "bug-solutions-mcp"}
-
-
 if __name__ == "__main__":
-    # Run with uvicorn
-    # To start: python mcp_server.py
-    # Or: uvicorn mcp_server:app --host 0.0.0.0 --port 8000
     port = int(os.getenv("PORT", "8000"))
     mcp.run(transport="streamable-http", host="0.0.0.0", port=port)
