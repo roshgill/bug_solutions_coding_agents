@@ -3,8 +3,10 @@ import json
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from openai import OpenAI
-import chromadb
+import psycopg2
+from psycopg2.extras import execute_values
 from pydantic import Field
+import numpy as np
 
 load_dotenv()
 
@@ -12,19 +14,22 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 if not OPENAI_API_KEY:
     raise ValueError("OPENAI_API_KEY not found in .env file")
 
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    # For local development
+    DATABASE_URL = "postgresql://localhost/bug_solutions"
+
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
 
-# Use relative paths that work both locally and in Docker/Fly
-BASE_PATH = os.path.dirname(os.path.abspath(__file__))
-CHROMA_DB_PATH = os.path.join(BASE_PATH, "chroma_db")
-COLLECTION_NAME = "github_issues"
-CORPUS_PATH = os.path.join(BASE_PATH, "issues_corpus.json")
-
-# Initialize Chroma
-chroma_client = chromadb.PersistentClient(path=CHROMA_DB_PATH)
-collection = chroma_client.get_collection(name=COLLECTION_NAME)
+# Clean connection string for psycopg2
+CLEAN_DB_URL = DATABASE_URL.split("?")[0]
 
 mcp = FastMCP("BugSolutionsMCP", log_level="ERROR")
+
+
+def get_db_connection():
+    """Get a database connection."""
+    return psycopg2.connect(CLEAN_DB_URL, sslmode="require" if "neon" in DATABASE_URL else "disable")
 
 
 def generate_embedding(text: str) -> list[float]:
@@ -34,6 +39,13 @@ def generate_embedding(text: str) -> list[float]:
         input=text,
     )
     return response.data[0].embedding
+
+
+def vector_similarity(vec1: list[float], vec2: list[float]) -> float:
+    """Calculate cosine similarity between two vectors."""
+    a = np.array(vec1)
+    b = np.array(vec2)
+    return float(np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b)))
 
 
 @mcp.tool(
@@ -52,60 +64,60 @@ def search_bugs(
         JSON string containing top 3 most similar resolved issues with full thread and metadata
     """
     try:
-        # Generate embedding for the query
+        # Generate embedding for query
         query_embedding = generate_embedding(query)
-
-        # Search Chroma for top 3 similar issues
-        results = collection.query(
-            query_embeddings=[query_embedding],
-            n_results=3,
-            include=["documents", "metadatas", "distances"],
-        )
-
-        if not results["ids"] or not results["ids"][0]:
-            return json.dumps({"error": "No similar issues found in the database."})
-
-        # Load corpus once
-        corpus = {}
-        if os.path.exists(CORPUS_PATH):
-            with open(CORPUS_PATH, "r") as f:
-                corpus_list = json.load(f)
-                corpus = {issue["id"]: issue for issue in corpus_list}
-
-        # Format results with full thread data
+        
+        # Connect to database
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Get all embeddings and compute similarity
+        cur.execute("SELECT id, embedding FROM embeddings")
+        results = cur.fetchall()
+        
+        if not results:
+            return json.dumps({"error": "No issues found in database"})
+        
+        # Calculate similarities
+        similarities = []
+        for issue_id, embedding in results:
+            similarity = vector_similarity(query_embedding, embedding)
+            similarities.append((issue_id, similarity))
+        
+        # Sort by similarity (descending) and get top 3
+        top_3 = sorted(similarities, key=lambda x: x[1], reverse=True)[:3]
+        
+        # Fetch issue details
         output = []
-        for i, (doc_id, metadata, distance) in enumerate(
-            zip(
-                results["ids"][0],
-                results["metadatas"][0],
-                results["distances"][0],
-            )
-        ):
-            result_entry = {
-                "rank": i + 1,
-                "id": doc_id,
-                "title": metadata.get("title", ""),
-                "url": metadata.get("url", ""),
-                "repo": metadata.get("repo", ""),
-                "issue_number": metadata.get("issue_number", ""),
-                "labels": metadata.get("labels", "").split(",") if metadata.get("labels") else [],
-                "created_at": metadata.get("created_at", ""),
-                "closed_at": metadata.get("closed_at", ""),
-                "distance": round(distance, 4),
-                "body": "",
-                "resolution_text": "",
-                "comments": [],
-            }
-
-            # Load full issue data from corpus
-            if doc_id in corpus:
-                issue = corpus[doc_id]
-                result_entry["body"] = issue.get("body", "")
-                result_entry["resolution_text"] = issue.get("resolution_text", "")
-                result_entry["comments"] = issue.get("comments", [])
-
-            output.append(result_entry)
-
+        for rank, (issue_id, similarity) in enumerate(top_3, 1):
+            cur.execute("""
+                SELECT id, repo, issue_number, url, title, body, labels, 
+                       created_at, closed_at, resolution_text, comments
+                FROM issues WHERE id = %s
+            """, (issue_id,))
+            
+            row = cur.fetchone()
+            if row:
+                result_entry = {
+                    "rank": rank,
+                    "id": row[0],
+                    "repo": row[1],
+                    "issue_number": row[2],
+                    "url": row[3],
+                    "title": row[4],
+                    "body": row[5],
+                    "labels": row[6].split(",") if row[6] else [],
+                    "created_at": row[7],
+                    "closed_at": row[8],
+                    "resolution_text": row[9],
+                    "comments": json.loads(row[10]) if row[10] else [],
+                    "distance": round(1 - similarity, 4),  # Convert similarity to distance
+                }
+                output.append(result_entry)
+        
+        cur.close()
+        conn.close()
+        
         return json.dumps(output, indent=2)
 
     except Exception as e:
