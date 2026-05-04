@@ -24,7 +24,8 @@ openai_client = OpenAI(api_key=OPENAI_API_KEY)
 # Clean connection string for psycopg2
 CLEAN_DB_URL = DATABASE_URL.split("?")[0]
 
-mcp = FastMCP("BugSolutionsMCP", log_level="ERROR")
+port = int(os.getenv("PORT", "8000"))
+mcp = FastMCP("BugSolutionsMCP", host="0.0.0.0", port=port, log_level="ERROR")
 
 
 def get_db_connection():
@@ -125,5 +126,4 @@ def search_bugs(
 
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", "8000"))
-    mcp.run(transport="http", host="0.0.0.0", port=port)
+    mcp.run(transport="streamable-http")
