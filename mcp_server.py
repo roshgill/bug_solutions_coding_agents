@@ -111,7 +111,7 @@ def search_bugs(
                     "created_at": row[7],
                     "closed_at": row[8],
                     "resolution_text": row[9],
-                    "comments": json.loads(row[10]) if row[10] else [],
+                    "comments": row[10] if isinstance(row[10], list) else (json.loads(row[10]) if row[10] else []),
                     "distance": round(1 - similarity, 4),  # Convert similarity to distance
                 }
                 output.append(result_entry)
