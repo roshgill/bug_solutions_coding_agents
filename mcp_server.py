@@ -51,10 +51,10 @@ def vector_similarity(vec1: list[float], vec2: list[float]) -> float:
 
 @mcp.tool(
     name="search_bug_solution",
-    description="Search for bug solutions from database"
+    description="Bug solutions for coding agents sourced from resolved GitHub issues. Search when you hit a runtime error, exception, or cryptic error message you can't resolve. Returns confirmed fixes from closed issues — query with the error message, stack trace, or bug description to search for."
 )
 def search_bugs(
-    query: str = Field(description="Query for database search")
+    query: str = Field(description="Error message, stack trace, or bug description to search for")
 ):
     """Search for similar bug solutions and resolutions.
 
