@@ -67,11 +67,11 @@ def search_bugs(
     try:
         # Generate embedding for query
         query_embedding = generate_embedding(query)
-        
+
         # Connect to database
         conn = get_db_connection()
         cur = conn.cursor()
-        
+
         # Get all embeddings and compute similarity
         cur.execute("SELECT id, embedding FROM embeddings")
         results = cur.fetchall()
