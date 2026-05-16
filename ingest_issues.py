@@ -3,6 +3,8 @@ import json
 import time
 import os
 import re
+import sys
+import argparse
 from dotenv import load_dotenv
 from datetime import datetime
 
@@ -12,9 +14,9 @@ GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 if not GITHUB_TOKEN:
     raise ValueError("GITHUB_TOKEN not found in .env file")
 
-REPOS = [
-    ("facebook", "meta-wearables-dat-ios"),
-    ("facebook", "meta-wearables-dat-android"),
+# Default repos (used if no command-line args)
+DEFAULT_REPOS = [
+    ("openai", "tiktoken"),
 ]
 
 BASE_URL = "https://api.github.com"
@@ -100,7 +102,11 @@ def fetch_comments(owner, repo, issue_number):
             "page": page,
         }
 
+        print(f"    [DEBUG] Fetching comments for {repo}#{issue_number} (page {page})", flush=True)
         response = requests.get(url, headers=HEADERS, params=params)
+        remaining = response.headers.get("x-ratelimit-remaining", "?")
+        reset_time = response.headers.get("x-ratelimit-reset", "?")
+        print(f"    [DEBUG] Status: {response.status_code}, Remaining: {remaining}, Reset: {reset_time}", flush=True)
         response.raise_for_status()
 
         data = response.json()
@@ -137,7 +143,11 @@ def fetch_events(owner, repo, issue_number):
             "page": page,
         }
 
+        print(f"    [DEBUG] Fetching events for {repo}#{issue_number} (page {page})", flush=True)
         response = requests.get(url, headers=HEADERS, params=params)
+        remaining = response.headers.get("x-ratelimit-remaining", "?")
+        reset_time = response.headers.get("x-ratelimit-reset", "?")
+        print(f"    [DEBUG] Status: {response.status_code}, Remaining: {remaining}, Reset: {reset_time}", flush=True)
         response.raise_for_status()
 
         data = response.json()
@@ -175,7 +185,7 @@ def find_resolution_comment(comments, closed_at):
 def structure_issue(owner, repo, issue):
     """Structure an issue into the desired format."""
     comments = fetch_comments(owner, repo, issue["number"])
-    events = fetch_events(owner, repo, issue["number"])
+    # events = fetch_events(owner, repo, issue["number"])
 
     # Find the closed event timestamp
     closed_timestamp = issue["closed_at"]
@@ -229,15 +239,43 @@ def structure_issue(owner, repo, issue):
 
 
 def main():
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description="Fetch closed issues from GitHub repositories"
+    )
+    parser.add_argument(
+        "owner",
+        nargs="?",
+        help="GitHub organization/owner (e.g., openai)",
+    )
+    parser.add_argument(
+        "repo",
+        nargs="?",
+        help="GitHub repository name (e.g., tiktoken)",
+    )
+    args = parser.parse_args()
+
+    # Determine repos to fetch
+    if args.owner and args.repo:
+        repos = [(args.owner, args.repo)]
+        print(f"Fetching from command-line args: {args.owner}/{args.repo}")
+    else:
+        repos = DEFAULT_REPOS
+        print(f"Fetching from default repos")
+
     all_issues = []
 
-    for owner, repo in REPOS:
+    for owner, repo in repos:
         print(f"\nFetching issues from {owner}/{repo}...")
         issues = fetch_issues(owner, repo)
 
-        for issue in issues:
-            structured = structure_issue(owner, repo, issue)
-            all_issues.append(structured)
+        for i, issue in enumerate(issues, 1):
+            try:
+                structured = structure_issue(owner, repo, issue)
+                all_issues.append(structured)
+            except Exception as e:
+                print(f"  WARNING: Failed to structure issue #{issue['number']}: {e}")
+                continue
 
     # Write to output file
     with open(OUTPUT_FILE, "w") as f:

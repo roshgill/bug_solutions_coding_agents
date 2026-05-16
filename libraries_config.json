@@ -1,0 +1,18 @@
+[
+  {
+    "organization": "psycopg",
+    "library": "psycopg2"
+  },
+  {
+    "organization": "theskumar",
+    "library": "python-dotenv"
+  },
+    {
+    "organization": "pallets",
+    "library": "flask"
+  },
+      {
+    "organization": "jsvine",
+    "library": "pdfplumber"
+  }
+]
