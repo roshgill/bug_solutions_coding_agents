@@ -257,5 +257,62 @@ def fetch_thread(
         return json.dumps({"error": f"Error fetching thread: {str(e)}"})
 
 
+@mcp.tool(
+    name="request_bug_solutions",
+    description="Request bug solutions to be indexed for a GitHub organization/library. Use this when you encounter an error from a library not yet in the database and want solutions for it indexed."
+)
+def request_bug_solutions(
+    organization: str = Field(description="GitHub organization name (e.g., 'openai', 'fastapi')"),
+    library: str = Field(description="GitHub repository name (e.g., 'tiktoken', 'fastapi')")
+):
+    """Request bug solutions for an organization/library.
+
+    Args:
+        organization: GitHub organization name
+        library: GitHub repository name
+
+    Returns:
+        JSON object confirming the request with timestamp and total request count
+    """
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        # Insert new request
+        cur.execute("""
+            INSERT INTO requests (organization, library)
+            VALUES (%s, %s)
+            RETURNING id, organization, library, requested_at
+        """, (organization, library))
+
+        row = cur.fetchone()
+
+        # Count how many times this org/library has been requested
+        cur.execute("""
+            SELECT COUNT(*) FROM requests
+            WHERE organization = %s AND library = %s
+        """, (organization, library))
+
+        request_count = cur.fetchone()[0]
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+        result = {
+            "id": row[0],
+            "organization": row[1],
+            "library": row[2],
+            "requested_at": str(row[3]),
+            "total_requests": request_count,
+            "message": f"Request #{request_count} for {organization}/{library}"
+        }
+
+        return json.dumps(result, indent=2)
+
+    except Exception as e:
+        return json.dumps({"error": f"Error requesting bug solutions: {str(e)}"})
+
+
 if __name__ == "__main__":
     mcp.run(transport="streamable-http")
