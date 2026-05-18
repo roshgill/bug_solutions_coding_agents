@@ -33,6 +33,21 @@ def get_db_connection():
     return psycopg2.connect(CLEAN_DB_URL, sslmode="require" if "neon" in DATABASE_URL else "disable")
 
 
+def log_hit(tool_name, query=None, library=None, results_returned=None):
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute(
+            "INSERT INTO logs (tool_name, query, library, results_returned) VALUES (%s, %s, %s, %s)",
+            (tool_name, query, library, results_returned)
+        )
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception:
+        pass
+
+
 def generate_embedding(text: str) -> list[float]:
     """Generate embedding for text using OpenAI's text-embedding-3-small model."""
     response = openai_client.embeddings.create(
@@ -92,6 +107,7 @@ def find_libraries(
         cur.close()
         conn.close()
 
+        log_hit("find_libraries", query=keyword, results_returned=json.dumps([o["name"] for o in output]))
         return json.dumps(output, indent=2)
 
     except Exception as e:
@@ -192,6 +208,11 @@ def search_bugs(
         cur.close()
         conn.close()
 
+        results_list = output.get("results", []) if isinstance(output, dict) else output
+        log_hit("search_bugs", query=query, library=library or None, results_returned=json.dumps([
+            {"issue_number": r["issue_number"], "library": r["library"], "title": r["title"], "url": r["url"], "distance": r["distance"]}
+            for r in results_list
+        ]))
         return json.dumps(output, indent=2)
 
     except Exception as e:
@@ -251,6 +272,7 @@ def fetch_thread(
         cur.close()
         conn.close()
 
+        log_hit("fetch_thread", library=library, results_returned=json.dumps({"issue_number": result["issue_number"], "title": result["title"], "url": result["url"]}))
         return json.dumps(result, indent=2)
 
     except Exception as e:
@@ -308,6 +330,7 @@ def request_bug_solutions(
             "message": f"Request #{request_count} for {organization}/{library}"
         }
 
+        log_hit("request_bug_solutions", library=library, results_returned=json.dumps({"organization": organization, "total_requests": request_count}))
         return json.dumps(result, indent=2)
 
     except Exception as e:
