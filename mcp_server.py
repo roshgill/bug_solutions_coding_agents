@@ -1,10 +1,11 @@
 import os
 import json
+from typing import List
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 from openai import OpenAI
 import psycopg2
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 load_dotenv()
 
@@ -55,6 +56,33 @@ def vec(embedding: list[float]) -> str:
     return "[" + ",".join(str(x) for x in embedding) + "]"
 
 
+class RankingResult(BaseModel):
+    top_3_indices: List[int]  # 1-based indices into the candidates list, in order of relevance
+
+
+def rerank(query: str, candidates: list) -> list:
+    numbered = "\n".join([
+        f"{i+1}. [{c['library']}] #{c['issue_number']} (distance: {c['distance']:.4f})\n   Title: {c['title']}\n   Body: {c['body']}"
+        for i, c in enumerate(candidates)
+    ])
+    completion = openai_client.chat.completions.parse(
+        model="gpt-5.4-nano",
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a relevance judge for a bug solutions search engine. Given a developer query and a list of GitHub issues, return the 1-based indices of the 3 most relevant issues in order of relevance."
+            },
+            {
+                "role": "user",
+                "content": f"Query: {query}\n\nCandidates:\n{numbered}"
+            }
+        ],
+        response_format=RankingResult,
+    )
+    picks = completion.choices[0].message.parsed.top_3_indices
+    return [candidates[i - 1]["id"] for i in picks if 0 < i <= len(candidates)]
+
+
 @mcp.tool(
     name="search_bugs",
     description="""Search indexed GitHub issues for bug solutions matching an error or symptom.
@@ -88,46 +116,66 @@ def search_bugs(
         library_fallback = False
         if libraryName:
             cur.execute("""
-                SELECT i.id, 1 - (i.embedding <=> %s::vector) AS similarity
+                SELECT i.id, i.issue_number, i.title, i.body, l.name,
+                       1 - (i.embedding <=> %s::vector) AS similarity
                 FROM issues i
                 JOIN libraries l ON i.library_id = l.id
                 WHERE l.name = %s
                 ORDER BY i.embedding <=> %s::vector
-                LIMIT 3
+                LIMIT 10
             """, (embedding, libraryName, embedding))
             rows = cur.fetchall()
 
             if not rows:
                 library_fallback = True
                 cur.execute("""
-                    SELECT id, 1 - (embedding <=> %s::vector) AS similarity
-                    FROM issues
-                    ORDER BY embedding <=> %s::vector
-                    LIMIT 3
+                    SELECT i.id, i.issue_number, i.title, i.body, l.name,
+                           1 - (i.embedding <=> %s::vector) AS similarity
+                    FROM issues i
+                    JOIN libraries l ON i.library_id = l.id
+                    ORDER BY i.embedding <=> %s::vector
+                    LIMIT 10
                 """, (embedding, embedding))
                 rows = cur.fetchall()
         else:
             cur.execute("""
-                SELECT id, 1 - (embedding <=> %s::vector) AS similarity
-                FROM issues
-                ORDER BY embedding <=> %s::vector
-                LIMIT 3
+                SELECT i.id, i.issue_number, i.title, i.body, l.name,
+                       1 - (i.embedding <=> %s::vector) AS similarity
+                FROM issues i
+                JOIN libraries l ON i.library_id = l.id
+                ORDER BY i.embedding <=> %s::vector
+                LIMIT 10
             """, (embedding, embedding))
             rows = cur.fetchall()
 
         if not rows:
             return json.dumps({"error": "No issues found in database"})
 
+        candidates = [
+            {
+                "id": r[0],
+                "issue_number": r[1],
+                "title": r[2],
+                "body": (r[3] or "")[:300],
+                "library": r[4],
+                "distance": round(1 - r[5], 4),
+            }
+            for r in rows
+        ]
+
+        top_3_ids = rerank(query, candidates)
+
         output = []
-        for rank, (issue_id, similarity) in enumerate(rows, 1):
+        for rank, issue_id in enumerate(top_3_ids, 1):
             cur.execute("""
                 SELECT i.issue_number, i.title, i.body, i.labels,
                        i.created_at, i.closed_at, i.resolution_text, i.comments, i.id,
-                       l.name, l.organization
+                       l.name, l.organization,
+                       1 - (i.embedding <=> %s::vector) AS similarity
                 FROM issues i
                 JOIN libraries l ON i.library_id = l.id
                 WHERE i.id = %s
-            """, (issue_id,))
+            """, (embedding, issue_id))
             row = cur.fetchone()
             if row:
                 output.append({
@@ -143,7 +191,7 @@ def search_bugs(
                     "closed_at": row[5],
                     "resolution_text": row[6],
                     "comments": row[7] if isinstance(row[7], list) else (json.loads(row[7]) if row[7] else []),
-                    "distance": round(1 - similarity, 4),
+                    "distance": round(1 - row[11], 4),
                 })
 
         result = {"library_fallback": True, "results": output} if library_fallback else {"results": output}
