@@ -34,3 +34,6 @@ issues_corpus.json
 build/
 dist/
 *.egg-info/
+
+# Personal
+CLAUDE.md
