@@ -292,7 +292,7 @@ def embed_and_insert(issues, library_id):
                     INSERT INTO issues
                     (issue_number, url, title, body, labels, created_at, closed_at, resolution_text, comments, library_id)
                     VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ON CONFLICT DO NOTHING
+                    ON CONFLICT (issue_number, library_id) DO NOTHING
                     RETURNING numeric_id
                 """, (
                     issue["issue_number"],
@@ -309,17 +309,19 @@ def embed_and_insert(issues, library_id):
 
                 result = cur.fetchone()
                 if not result:
-                    log(f"  Issue {issue['id']} already exists, skipping", "DEBUG")
+                    log(f"  CONFLICT: {issue['id']} already exists (issue_number={issue['issue_number']}, library_id={library_id})", "DEBUG")
                     continue
 
                 numeric_id = result[0]
+                log(f"  INSERTED: {issue['id']} → numeric_id={numeric_id}", "DEBUG")
 
                 # Insert embedding
+                vec = "[" + ",".join(str(x) for x in embedding) + "]"
                 cur.execute("""
                     INSERT INTO embeddings (issue_id, embedding)
-                    VALUES (%s, %s)
+                    VALUES (%s, %s::vector)
                     ON CONFLICT DO NOTHING
-                """, (numeric_id, embedding))
+                """, (numeric_id, vec))
 
                 inserted_count += 1
                 if i % 10 == 0:
