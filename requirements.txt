@@ -1,8 +1,8 @@
+# Last updated: 2026-05-22
 requests==2.31.0
 python-dotenv==1.0.0
 openai==1.68.0
 psycopg2-binary==2.9.10
-numpy>=2.0.2
 mcp==1.12.4
 fastapi==0.115.6
 uvicorn==0.34.0

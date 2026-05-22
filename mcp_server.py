@@ -65,7 +65,7 @@ def rerank(query: str, candidates: list) -> list:
         f"{i+1}. [{c['library']}] #{c['issue_number']} (distance: {c['distance']:.4f})\n   Title: {c['title']}\n   Body: {c['body']}"
         for i, c in enumerate(candidates)
     ])
-    completion = openai_client.chat.completions.parse(
+    completion = openai_client.beta.chat.completions.parse(
         model="gpt-5.4-nano",
         messages=[
             {
