@@ -28,18 +28,24 @@ load_dotenv()
 
 # Configuration: list of (owner, repo) tuples to scrape
 REPOS = [
-("facebook", "pyrefly"),
-("millionco", "react-doctor"),
-("langchain-ai", "langchain"),
-("huggingface", "transformers"),
-("vercel", "next.js"),
-("supabase", "supabase-py"),
-("pydantic", "pydantic"),
-("tiangolo", "sqlmodel"),
-("encode", "httpx"),
-("celery", "celery"),
-("django", "django"),
-("redis", "redis-py")
+    ("stripe", "stripe-python"),
+    ("boto", "boto3"),
+    ("docker", "docker-py"),
+    ("celery", "celery"),
+    ("encode", "httpx"),
+    ("sqlalchemy", "sqlalchemy"),
+    ("redis", "redis-py"),
+    ("mongodb", "mongo-python-driver"),
+    ("twilio", "twilio-python"),
+    ("aws", "aws-cdk"),
+    ("hashicorp", "terraform"),
+    ("ansible", "ansible"),
+    ("pytest-dev", "pytest"),
+    ("psf", "requests"),
+    ("aio-libs", "aiohttp"),
+    ("pydantic", "pydantic"),
+    ("huggingface", "datasets"),
+    ("langchain-ai", "langchain"),
 ]
 
 # Environment setup
@@ -250,13 +256,14 @@ def insert_issue(issue, library_id):
 
     try:
         embedding = generate_embedding(issue["embed_text"])
+        vec = "[" + ",".join(str(x) for x in embedding) + "]"
 
         cur.execute("""
             INSERT INTO issues
-            (issue_number, url, title, body, labels, created_at, closed_at, resolution_text, comments, library_id)
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            (issue_number, url, title, body, labels, created_at, closed_at, resolution_text, comments, library_id, embedding)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s::vector)
             ON CONFLICT (issue_number, library_id) DO NOTHING
-            RETURNING numeric_id
+            RETURNING id
         """, (
             issue["issue_number"],
             issue["url"],
@@ -268,6 +275,7 @@ def insert_issue(issue, library_id):
             issue["resolution_text"],
             json.dumps(issue["comments"]),
             library_id,
+            vec,
         ))
 
         result = cur.fetchone()
@@ -277,15 +285,8 @@ def insert_issue(issue, library_id):
             conn.close()
             return False
 
-        numeric_id = result[0]
-        log(f"    INSERTED: {issue['id']} → numeric_id={numeric_id}", "DEBUG")
-
-        vec = "[" + ",".join(str(x) for x in embedding) + "]"
-        cur.execute("""
-            INSERT INTO embeddings (issue_id, embedding)
-            VALUES (%s, %s::vector)
-            ON CONFLICT DO NOTHING
-        """, (numeric_id, vec))
+        issue_id = result[0]
+        log(f"    INSERTED: {issue['id']} → id={issue_id}", "DEBUG")
 
         conn.commit()
         cur.close()
@@ -335,13 +336,14 @@ def get_library_id(conn, owner, repo):
     # Create if missing
     log(f"Creating library entry for '{repo}' ({owner})...", "INFO")
     embedding = generate_embedding(repo)
+    vec = "[" + ",".join(str(x) for x in embedding) + "]"
 
     cur.execute("""
         INSERT INTO libraries (name, embedding, organization)
-        VALUES (%s, %s, %s)
-        ON CONFLICT (name) DO UPDATE SET id = EXCLUDED.id
+        VALUES (%s, %s::vector, %s)
+        ON CONFLICT (name, organization) DO UPDATE SET id = EXCLUDED.id
         RETURNING id
-    """, (repo, embedding, owner))
+    """, (repo, vec, owner))
 
     lib_id = cur.fetchone()[0]
     conn.commit()
