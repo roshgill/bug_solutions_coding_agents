@@ -99,7 +99,7 @@ Each result includes:
 Steps:
 1. Call this tool first with the exact error message or symptom as the query
 2. If comments contain linked issue numbers, call fetch_thread to follow them
-3. If results are not relevant to your error, call request_bug_solutions to get the library indexed
+3. If results are not relevant to your error, call request_library to get the library indexed
 4. For external URLs in comments, use web search
 
 IMPORTANT: Do not call this tool more than 3 times per question. Use the best result you have."""
@@ -265,7 +265,7 @@ def fetch_thread(
 
 
 @mcp.tool(
-    name="request_bug_solutions",
+    name="request_library",
     description="""Request a GitHub library to be indexed for bug solutions.
 
 Use this when search_bugs returns no useful results and the library is not yet in the database.
